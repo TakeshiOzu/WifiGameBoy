@@ -3,6 +3,9 @@
 #include <stdint.h>        // 標準整数型の定義を提供するヘッダをインクルード
 #include <stdio.h>         // 標準入出力関数を提供するヘッダをインクルード
 #include <string.h>         //文字列関数
+#include <stdbool.h>
+
+#include "data/music/song_1.c"//BGM
 
 #include "font.c"
 #include "keyboard.c"       //キーボード用...
@@ -18,26 +21,27 @@ ESPとの通信
 mainループ内に設置して、必ず踏むようにする。
 GB側が処理できるように、ESP側の通信には接頭語句が付く?switch構文で対応。関数とする。
 例：SSIDリスト　->S とか。
-１バイトデータでの送受信を前提とする。
-
-現在通信不成立...
+原則１バイトデータでの送受信を前提とする。ESP側で翻訳を行う。
 */
 
 
-// SSIDリストを定義(書き換える。ポインタではダメかも)
-unsigned char ssids[][32] = {
+// SSIDリストを定義
+unsigned char ssids[20][32];//32文字データを20項目確保。
+uint8_t num_ssids = 20;
+/* = {
     "AAAAAAAAAA", "BBBBBBBBBB", "CCCCCCCCCC", "DDDDDDDDDD", "EEEEEEEEEE", "FFFFFFFFFF", "GGGGGGGGGG", "HHHHHHHH", "IIIIIII", "JJJJJJ", "KKKKKK", "LLLLLL", "MMMMMM", "NNNNNN"
-};
+};*/
 unsigned char pass[32];//パスワード
 uint8_t passIdx=0; //パスワード入力位置
-//デバッグ用文字列(読み取り用なのでポインタでよい)
+///*//デバッグ用文字列(読み取り用なのでポインタでよい)
 unsigned char *ssidsOverride={
-    "Saqwsftasd\ndxfeAFWYU\n@kojiuhgya\n71934h2ibru\nuoqamvdzvg\nuohbiuawc\nsdf-qweafc\npingo!!asds\nchrs_2.4G\nGETOUT_PWR\nGETOUT_PWR\nGETOUT_PWR\nGETOUT_PWR"
+    "Saqwsftasd\ndxfeAFWYU\n\n@kojiuhgya\n\n71934h2ibru\nuoqamvdzvg\nuohbiuawc\nsdf-qweafc\npingo!!asds\nchrs_2.4G\nGETOUT_PWR\nGETOUT_PWR\nGETOUT_PWR\nGETOUT_PWR"
 };
 unsigned char *UTF8sanpleText={
     "みんな、みえているか!?\nオレ ###は 2022ねん から タイムトリップ してきたのだが ココでは いったい ナニが おきているんだ...?"
 };
-uint8_t num_ssids = sizeof(ssids) / sizeof(ssids[0]);  // SSIDの数を計算...サイズ統一が前提。初期設定にはよい。
+//*/
+
 const uint8_t ssidsPerPage = 11;  // 1ページあたりのSSID数
 uint8_t currentSelection = 0;  // 現在選択されているSSIDのインデックス
 uint8_t currentPage = 0;  // 現在のページ番号
@@ -53,6 +57,7 @@ uint8_t currentPage = 0;  // 現在のページ番号
 #define KEYSTY 88//キーボード開始座標
 #define TYPEINIX 32
 #define TYPEINIY 64 //入力末尾スプライト初期位置
+#define BGMNUM 1 //音楽の数
 
 
 uint8_t spriteDebug =0; //デバッグ用。
@@ -76,6 +81,16 @@ typedef struct Blinker{//キーボード入力末尾スプライトの構造体
 } Blinker;
 Blinker blinker ={TYPEADLS,0,0,100};//キーボード入力末尾スプライトの構造体インスタンス
 SpriteNorm arrow ={0,0,0,KEYSTX,KEYSTY};//キーボード入力時のためのカーソル構造体インスタンス
+
+//BGM管理用変数
+    const uint16_t EndofNote[BGMNUM] ={2304};//2304 forSONG1
+    volatile uint8_t currentBGM =0;
+    volatile uint16_t currentNoteIndex[BGMNUM][4];//if +8 >EON 
+    volatile bool isFinishedNote[4] ={false,false,false,false};
+    volatile bool isPlayingBGM =true;
+    volatile uint16_t noteDurationCounter[4];//0,0,0,0
+    volatile uint8_t noteSpeed=1;
+    
 
   
 void readFromESP(unsigned char * result) {//ESPから受信を行う関数  
@@ -102,7 +117,7 @@ void sendToESP(unsigned char * s) {//ESPへ送信を行う関数
         }
     } while (*(i++) != '\0');
 }
-//描画用関数:marginなど
+//描画用変数:marginなど
 unsigned char arrow_tiles[] = {
 0x18,0x00,0x0c,0x00,
 0x06,0x00,0x03,0x00,
@@ -128,6 +143,13 @@ unsigned char reload_arrow_tiles[] = {
 0x41,0x85,0x05,0x06
 };
 
+//melody
+// Example music data for each channel. 8*4
+const uint8_t channels_data[] = {0x44, 0x10, 0x48, 0x10, 0x4C, 0x10, 0x00, 0x00,
+                                0x40, 0x10, 0x43, 0x10, 0x47, 0x10, 0x00, 0x00,
+                                0x00, 0x10, 0x02, 0x10, 0x04, 0x10, 0x00, 0x00,
+                                0x22, 0x10, 0x23, 0x10, 0x24, 0x10, 0x00, 0x00};
+
 
 // スプライトをセットアップする関数
 void setupArrowSprite() {
@@ -140,6 +162,7 @@ void setupReloadSprite() {
     set_sprite_tile(1, 1);                      // スプライトタイルを設定（1番目のスプライトに1番目のタイルを使用）
     move_sprite(1, 92, 40);                    // スプライトの位置を設定（右上隅近く）
 }
+
 void setupFont(){
     set_bkg_data(0, 216, gl_font);
     set_sprite_data(2,216,gl_font);
@@ -158,6 +181,10 @@ void hideTextSprites() {
         move_sprite(i, 0, 0);  // スプライトを画面外に移動
         hide_sprite(i);  // スプライトを非表示にする
     }
+}
+void drawLoading(int i){//なんか。
+    int x = 60;
+    int y = 120;
 }
 
 //文書表示時のテキスト描画について、濁点例外処理。
@@ -220,7 +247,6 @@ void drawKeyBoard(){
     SHOW_BKG; //背景表示
     move_sprite(arrow.ID,arrow.x,arrow.y);//カーソル移動   
 }
-
 //デバッグ用効果音
 void debugSE(int  sel){
     switch(sel){
@@ -244,13 +270,120 @@ void debugSE(int  sel){
 
 }    
 
+//音楽関係
+void playNote(uint8_t note, uint8_t chnl) {
+
+        switch (chnl)
+        {
+        case 0:
+            // Set sound registers for Channel 1
+            NR10_REG = 0x16; // Sweep settings
+            NR11_REG = 0x40; // Sound length/wave pattern duty
+            NR12_REG = 0x73; // Volume envelope
+            NR13_REG = note; // Frequency low
+            NR14_REG = 0x86; // Frequency high + start
+            break;
+        case 1:
+            // Set sound registers for Channel 2
+            NR21_REG = 0x40; // Sound length/wave pattern duty
+            NR22_REG = 0x73; // Volume envelope
+            NR23_REG = note; // Frequency low
+            NR24_REG = 0x86; // Frequency high + start
+            break;
+        case 2:
+            // Set sound registers for Channel 3
+            NR30_REG = 0x80; // Channel on
+            NR31_REG = 0xFF; // Sound length
+            NR32_REG = 0x20; // Select output level
+            NR33_REG = note; // Frequency low
+            NR34_REG = 0xC0; // Frequency high + start
+            break;
+        case 3:
+            // Set sound registers for Channel 4
+            NR41_REG = 0x30; // Sound length
+            NR42_REG = 0x73; // Volume envelope
+            NR43_REG = note; // Polynomial counter
+            NR44_REG = 0xC0; // Start sound
+            break;                                
+        default:
+            break;
+        }
+
+ 
+
+}
+void updateMusic() {//driven as VBLank_ISR
+    if (!isPlayingBGM) return; // Do nothing if paused
+    
+    for(int i=0; i<4; i++){
+        set_sprite_tile(i+2,currentNoteIndex[currentBGM][i]%128);
+        move_sprite(i+2,16+currentNoteIndex[currentBGM][i]/100,132+i*8);
+        if (noteDurationCounter[i] == 0) {
+            uint8_t note = SONG_1[currentNoteIndex[currentBGM][i]+(i*2)];
+            uint8_t duration = SONG_1[currentNoteIndex[currentBGM][i]+(i*2)+1];
+
+            if (currentNoteIndex[currentBGM][i]+8 >= EndofNote[currentBGM]) {//compare currentNoteIndex to length of the SONG. 
+                isFinishedNote[i] =true;
+                currentNoteIndex[currentBGM][i] = i*2; // Reset to loop the melody
+            } else {
+                playNote(note,i);
+                noteDurationCounter[i] = duration * noteSpeed; // Adjust duration scale
+                currentNoteIndex[currentBGM][i] += 8;
+            }
+        } else {
+            noteDurationCounter[i]--;
+        }
+    }
+    if(isFinishedNote[0]&&isFinishedNote[1]&&isFinishedNote[2]&&isFinishedNote[3]){//reset for loop
+        debugSE(1);
+        for(int i=0;i<4;i++){
+            
+            isFinishedNote[i] =false;
+            currentNoteIndex[currentBGM][i]=0;
+            noteDurationCounter[i]=0;
+        }
+    } 
+
+}
+void stopMusic() {
+    NR12_REG = 0x00; // Stop sound on Channel 1
+    NR22_REG = 0x00; // Stop sound on Channel 2
+    NR30_REG = 0x00; // Stop sound on Channel 3
+    NR42_REG = 0x00; // Stop sound on Channel 4
+}
+void pauseMusic() {
+    //stopMusic(); // Silence the music
+    NR12_REG = 0x00;
+    isPlayingBGM = false;
+}
+
+void resumeMusic() {
+    isPlayingBGM = true;
+}
+void resetMusic(){
+    isPlayingBGM=true;//場合によって消す
+
+    for(int i=0; i<4; i++){
+        currentNoteIndex[currentBGM][i]=0;
+        noteDurationCounter[i]=0;
+        isFinishedNote[i]=false;
+    }
+
+}
+void controlMusicSpeed(uint8_t jps){
+    if((jps & J_LEFT) && noteSpeed>1) noteSpeed--;
+    if((jps & J_RIGHT) && noteSpeed<=20) noteSpeed= noteSpeed+1 ;
+}
+
+
+
 
 
 //SSID送信系をまとめた関数
 void sendConnectingInfo(char* password){
     unsigned char s[128];
     //strcpy(s,ssids[currentSelection]);
-    sprintf(s,"%s\n%s",ssids[currentSelection],password);//ssid,passの順でまとめる
+    sprintf(s,"SPAS%s\n%s",ssids[currentSelection],password);//接頭記号"SPAS"に続いて、ssid,passの順でまとめる
     //drawText(1,2,s);delay(1000);//デバッグ用
     //送信処理
     sendToESP(s);
@@ -345,7 +478,6 @@ void drawMainMenu() {
     for (uint8_t i = 0; i < ssidsPerPage; i++) {
         uint8_t index = i + currentPage * ssidsPerPage;  // 現在のページに応じたSSIDのインデックスを計算
         if (index < num_ssids) {
-            //printf("  %s\n", ssids[index]);  // SSIDを表示
             drawText(1,4+i,ssids[index]);
         }
     }
@@ -411,7 +543,10 @@ void updatePage(uint8_t joypadState) {
         }
     }
     if (joypadState & J_RIGHT) {
-        if (currentPage < (num_ssids / ssidsPerPage)) {
+        uint8_t newPageFlag =num_ssids/ssidsPerPage;
+        if(num_ssids==ssidsPerPage)newPageFlag=0;
+
+        if (currentPage < newPageFlag) {
             currentPage++;  // 右ボタンが押されたら次のページに移動
         }
     }
@@ -467,15 +602,20 @@ void writeToSsids(unsigned char* rawData){//SSIDに投入する処理
     uint8_t i=1;//読み出し用。０文字目無視
     uint8_t j=0;//書き込み用。
     do {//文字列がある間処理を行う。
-         if(rawData[i]=='\n'){//改行で更新処理
-            ssids[index][j]='\0';//終了文字添付
-            index++; i++; j=0;    
+         if(rawData[i]=='\n'){//改行で更新処理.
+        
+            //次の文字も確認した上で、終了処理をするかどうか判断。
+            if(rawData[i+1]!='\n'){//改行1回のみ。通常処理。
+                ssids[index][j]='\0';//終了文字添付
+                j=0; index++; //通常の終了処理
+            }//改行２回以上の場合は、１ループ後に再びこの検査を受けてもらう。 
+        }else{
+            //通常の文字の場合、SSIDに書き込み。改行文字は決してここに入れない！
+            ssids[index][j]=rawData[i];j++;
         }     
-        ssids[index][j]=rawData[i];//SSIDに書き込み
-
-        i++; j++;
+        i++; 
     }while(rawData[i]!='\0');
-    num_ssids=index;//読み取ったSSIDの数でnum_ssidsを再定義。
+    num_ssids=index-1;//読み取ったSSIDの数でnum_ssidsを再定義。
     
      
 }   
@@ -492,12 +632,12 @@ void decode(unsigned char* rawData){
             break;
     }
 }
-//ESPへのリクエスト関数。要るか？wiki.cの通信を参考に作成する。
+//ESPへのリクエスト関数。
 void requestToESP(unsigned char *s){
     sendToESP(s);
 }
 
-//テキスト表示テスト用関数(スプライト番号順)。
+/*//テキスト表示テスト用関数(スプライト番号順)。
 uint8_t showTextSpriteTest(uint8_t sprcode_head, uint8_t JP){
     uint8_t sps = sprcode_head;
     uint8_t sph = sprcode_head*16;
@@ -513,6 +653,7 @@ uint8_t showTextSpriteTest(uint8_t sprcode_head, uint8_t JP){
     set_bkg_tile_xy(19, 8, 0);set_bkg_tile_xy(20, 8, 0);
     return sps;
 }
+//*/
 
 
 //キー入力周りはinputだけ引き継いで関数内で処理した方が見やすいと思う...
@@ -526,40 +667,57 @@ void main(void) {
 ///*//デバッグ用効果音設定
     NR52_REG = 0x80; // サウンドを有効化    
     NR50_REG = 0x77; // 左右チャンネルの音量を MAX にする (01110111)
-    NR51_REG = 0xFF; // 全てのチャンネルのパンを振る (11111111)
-    
+    NR51_REG = 0xFF; // 全てのチャンネルのパンを振る (11111111)    
+//*/
+/*///BGM用インタラプト設定
+    disable_interrupts();
+    add_VBL(updateMusic);
+    enable_interrupts();   
 //*/
 
     DISPLAY_ON;  // ディスプレイをオンにする
     setupFont();　//キーボードスプライトをセットアップ
 
 
-    unsigned char buffer[512];
+    unsigned char buffer[256];
     
-    ///*/SSID読み取り部分。読めるまで無理やり継続する。
+    //*/SSID読み取り部分。読めるまで無理やり継続する。
 
-    drawText(1,6,"ROADING SSIDS\nPLEASE WAIT...");
+    drawText(1,6,"LOADING SSIDS\nPLEASE WAIT...");
     //delay(1000);//ESP立ち上げを待つ。必要なら入れる
     char *sendSignal = "SSID";//送信は一度きりにする。
     sendToESP(sendSignal);
     debugSE(1);
-    delay(1000);
-
+    delay(2000);//デバッグのためこうしているが、何らかの動きを見せても良い。
+    debugSE(0);
+    
     int delll =0;
     while(delll==0){
         readFromESP(buffer);
-        if(buffer[0]!='\0'){drawText(0,1,buffer);delay(250);}//デバッグ用。
+        
         if(buffer[0]=='S'){
             decode(buffer);//SSID一覧を取得する。 
             delll=1;
+        }else{
+            if(buffer[0]!='\0'){//文字列は受け取っているが、不正な値の場合。やり直しを要求...今回は手動にする
+                //sendToESP(sendSignal);
+                drawText(0,1,buffer);delay(2000);//デバッグ用。
+            }
+            
         }
+        //デバッグ用ブレーカ
+        joypadState = joypad();
+        if(joypadState & J_A)delll=1;
+        delay(100);
     }
+    debugSE(0);
     //*/
     //decode(ssidsOverride);//表示用ダミーSSID。
-
+    
+    cls();//ローディング画面初期化
     setupArrowSprite();  // 矢印スプライトをセットアップ
     setupReloadSprite();  // リロードスプライトをセットアップ
-    //drawMainMenu();  // 初期画面を描画,テストでは非表示。
+    drawMainMenu();  // 初期画面を描画,テストでは非表示。
     updateArrowPosition();  // 矢印の位置を更新
 
     /*//文字表示テスト用。
@@ -570,7 +728,7 @@ void main(void) {
     while (1) {
         
         joypadState = joypad();  // ジョイパッドの状態を取得
-        
+
         //通信機能仮取付。
         readFromESP(buffer);
         ///*
@@ -578,6 +736,8 @@ void main(void) {
             //ここに文字列判別メソッドを入れる。
             //debugSE(0);    
             decode(buffer);
+            drawText(0,1,buffer);//デバッグ用。
+            buffer[0] ='\0'; //文字列処理後は受け取り文字先頭を空白とし、二重処理を避ける。
         }//*/       
         
         
@@ -595,17 +755,19 @@ void main(void) {
             }
             if (joypadState & (J_LEFT | J_RIGHT)) {
                 updatePage(joypadState);  // ページを更新
+                controlMusicSpeed(joypadState);//デバッグ用、音楽速度調整
                 debugSE(0);
             }
             if (joypadState & J_A) {
                 switchScreen(SELECTEDSSID);
-                //sendToESP(buffer);
-            }if (joypadState & J_SELECT){
+            }if (joypadState & J_SELECT){//SSID再送の場合。連打を避けるためキーが離れるまで待つ。
                 //drawText(1,1,u8to1byteCode(buffer,UTF8sanpleText));
                 char *sendSignal = "SSID";
-                sendToESP(sendSignal);
+                //sendToESP(sendSignal);
                 debugSE(1);
                 waitpadup();
+            }if(joypadState & J_START){
+                    //resetMusic();
             }
         }
         
